@@ -21,6 +21,5 @@ The game lacks music, different decks, and only has 12 Boss Blinds and 15 Jokers
 - Fixed UI menu problems
 
 ## Errors
-- The UI of the menu is a mess... Still working on it!
 
 - All Jokers related to specific hands playeds dont work properly
