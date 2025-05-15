@@ -366,6 +366,7 @@ blind_ui_box = Image.load("sprites/ui/blinduibox.png", RAM)
 tutorial_sheet = Image.load("sprites/ui/ui.png", RAM)
 shop_sheet = Image.load("sprites/ui/moreui.png", RAM)
 menubg = Image.load("sprites/ui/mainmenubg.png", RAM)
+Image.scale(menubg, 256, 194)
 logo = Image.load("sprites/ui/logo.png", RAM)
 
 
@@ -1078,14 +1079,14 @@ while not Keys.newPress.Start do
 
     if scene == "menu" then
         Image.mirrorV(menubg, true)
-        screen.blit(SCREEN_DOWN, 0, 0, menubg)
+        screen.blit(SCREEN_DOWN, 0, -1, menubg)
         Image.mirrorV(menubg, false)
         screen.blit(SCREEN_UP, 0, 0, menubg)
         screen.blit(SCREEN_UP, 39, 44 - (logo_bop / 30), logo)
 
         screen.setAlpha(50)
         screen.drawFillRect(SCREEN_DOWN, 0, 78, 256, 113, Color.new256(0, 0, 0))
-        screen.drawFillRect(SCREEN_UP, 0, 78, 256, 113, Color.new256(0, 0, 0)) -- Ajuste aquí
+        screen.drawFillRect(SCREEN_UP, 0, 192, 256, 178, Color.new256(0, 0, 0))
         screen.setAlpha(100)
         screen.drawFillRect(SCREEN_DOWN, 0, 80, 256, 111, Color.new256(111, 111, 111))
         screen.print(SCREEN_DOWN, 84, 92, "PRESS A TO PLAY")
@@ -1095,7 +1096,7 @@ while not Keys.newPress.Start do
         logo_bop = logo_bop + 1
         if logo_bop > 119 then
             logo_bop = -120
-        end
+        end 
 
         if Keys.newPress.A then
             scene = "game"
@@ -1463,8 +1464,8 @@ while not Keys.newPress.Start do
             screen.print(SCREEN_UP, 4, 56, "Reward:", Color.new(31, 31, 31))
             screen.print(SCREEN_UP, 45, 56, number_to_payout(blind_payouts[blind]), Color.new256(241, 184, 91))
             Image.setTint(blind_ui, blind_info[blind][2])
-            screen.blit(SCREEN_UP, 2, 2, blind_ui)
-            screen.print(SCREEN_UP, 5, 7, blind_info[blind][1], Color.new(31, 31, 31))
+            screen.blit(SCREEN_UP, 2, 170, blind_ui) -- Movido a la parte inferior
+            screen.print(SCREEN_UP, 5, 175, blind_info[blind][1], Color.new(31, 31, 31))
 
             -- Tutorial Icons
             tutorial_graphics = Sprite.new(tutorial_sheet, 96, 16, VRAM)
