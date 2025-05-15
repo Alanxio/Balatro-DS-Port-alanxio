@@ -14,5 +14,5 @@ The game lacks music, different decks, and only has 12 Boss Blinds and 15 Jokers
 
 Now system for finding what the current hand played is working! Now only the played hands will count meanwhile the other cards will be discarded whitout be added to the chips counter.
 
-
+## Errors the UI of the menu is a mess... Still working on it!
 
