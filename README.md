@@ -20,4 +20,4 @@ Now system for finding what the current hand played is working! Now only the pla
 
 ## Errors
 The UI of the menu is a mess... Still working on it!
-
+All Jokers related to specific played hands dont work properly
