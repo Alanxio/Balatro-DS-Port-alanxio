@@ -1072,7 +1072,7 @@ function math.Clamp(val, lower, upper)
     return math.max(lower, math.min(upper, val))
 end
 
-logo_bop = -120
+logo_bop = 0 -- Cambiamos el valor inicial a 0
 
 while not Keys.newPress.Start do
     Controls.read()
@@ -1082,7 +1082,10 @@ while not Keys.newPress.Start do
         screen.blit(SCREEN_DOWN, 0, -1, menubg)
         Image.mirrorV(menubg, false)
         screen.blit(SCREEN_UP, 0, 0, menubg)
-        screen.blit(SCREEN_UP, 39, 44 - (logo_bop / 30), logo)
+        
+        -- Movimiento suave del logo usando seno
+        local logo_offset = math.sin(logo_bop / 30) * 4
+        screen.blit(SCREEN_UP, 39, 44 + logo_offset, logo)
 
         screen.setAlpha(50)
         screen.drawFillRect(SCREEN_DOWN, 0, 78, 256, 113, Color.new256(0, 0, 0))
@@ -1094,8 +1097,8 @@ while not Keys.newPress.Start do
         screen.print(SCREEN_UP, 2, 182, "GAME BY LOCAL THUNK, RECREATED BY HAYNSTER")
 
         logo_bop = logo_bop + 1
-        if logo_bop > 119 then
-            logo_bop = -120
+        if logo_bop >= 180 then -- Ajustamos el ciclo para una onda senoidal completa
+            logo_bop = 0
         end 
 
         if Keys.newPress.A then
@@ -1306,19 +1309,20 @@ while not Keys.newPress.Start do
                 sleep(700)
             elseif card_count_phase == 3 then
                 card_count_phase = 4
-				local scoring_cards = get_scoring_cards(hand, hand_type)
-				local card_counted = {}
-				local total_chips = 0
-				for i, card in ipairs(scoring_cards) do
-					total_chips = total_chips + convert_rank_to_num(string.sub(card, 1, 1))
-					card_counted[card] = true  -- Marcar la carta como contada
-					for i,v in ipairs(jokers) do
-						if not indep_jokers[v] then
-							execute_joker(v, card, hand_type)
-						end
-					end
-				end
-				chips = total_chips
+                local scoring_cards = get_scoring_cards(hand, hand_type)
+                local card_counted = {}
+                local total_chips = hand_multipliers[hand_type][1] -- Añadimos los chips base de la jugada
+                
+                for i, card in ipairs(scoring_cards) do
+                    total_chips = total_chips + convert_rank_to_num(string.sub(card, 1, 1))
+                    card_counted[card] = true
+                    for i,v in ipairs(jokers) do
+                        if not indep_jokers[v] then
+                            execute_joker(v, card, hand_type)
+                        end
+                    end
+                end
+                chips = total_chips
                 round_score = round_score + (chips * multiplier)
                 chips = 0
                 multiplier = 0
