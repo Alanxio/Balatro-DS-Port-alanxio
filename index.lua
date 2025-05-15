@@ -1,29 +1,260 @@
-scene = "menu"
+-- Required module for VRAM access
+Image = require("Image")
+
+--[[ Funciones de utilidad ]]--
+function get_scoring_cards(hand, hand_type)
+    local scoring_cards = {}
+    local ranks = {}
+    local suits = {}
+
+    -- Contar ranks y suits
+    for _, card in ipairs(hand) do
+        local rank = string.sub(card, 1, 1)
+        local suit = string.sub(card, 2, 2)
+        if not ranks[rank] then ranks[rank] = 0 end
+        if not suits[suit] then suits[suit] = 0 end
+        ranks[rank] = ranks[rank] + 1
+        suits[suit] = suits[suit] + 1
+    end
+
+	if hand_type == "Pair" then
+		for rank, count in pairs(ranks) do
+			if count == 2 then
+				-- Encontrar las dos cartas que forman el par
+				local found = 0
+				for j, c in ipairs(hand) do
+					if string.sub(c, 1, 1) == rank and found < 2 then
+						table.insert(scoring_cards, c)
+						found = found + 1
+					end
+				end
+				break
+			end
+		end
+	elseif hand_type == "Two Pair" then
+		local pairs_found = 0
+		local used_ranks = {}
+		for rank, count in pairs(ranks) do
+			if count == 2 and pairs_found < 2 then
+				pairs_found = pairs_found + 1
+				used_ranks[rank] = true
+				local found = 0
+				for j, c in ipairs(hand) do
+					if string.sub(c, 1, 1) == rank and found < 2 then
+						table.insert(scoring_cards, c)
+						found = found + 1
+					end
+				end
+			end
+		end
+	elseif hand_type == "Three of a Kind" then
+		for rank, count in pairs(ranks) do
+			if count == 3 then
+				local found = 0
+				for j, c in ipairs(hand) do
+					if string.sub(c, 1, 1) == rank and found < 3 then
+						table.insert(scoring_cards, c)
+						found = found + 1
+					end
+				end
+				break
+			end
+		end
+	elseif hand_type == "Four of a Kind" then
+		for rank, count in pairs(ranks) do
+			if count == 4 then
+				local found = 0
+				for j, c in ipairs(hand) do
+					if string.sub(c, 1, 1) == rank and found < 4 then
+						table.insert(scoring_cards, c)
+						found = found + 1
+					end
+				end
+				break
+			end
+		end
+	elseif hand_type == "Full House" then
+		local three_rank = nil
+		local pair_rank = nil
+
+		for rank, count in pairs(ranks) do
+			if count == 3 then
+				three_rank = rank
+			elseif count == 2 then
+				pair_rank = rank
+			end
+		end
+
+		if three_rank and pair_rank then
+			local found_three = 0
+			local found_pair = 0
+			for j, c in ipairs(hand) do
+				local rank = string.sub(c, 1, 1)
+				if rank == three_rank and found_three < 3 then
+					table.insert(scoring_cards, c)
+					found_three = found_three + 1
+				elseif rank == pair_rank and found_pair < 2 then
+					table.insert(scoring_cards, c)
+					found_pair = found_pair + 1
+				end
+			end
+		end
+    elseif hand_type == "Flush" then
+        local flush_suit = nil
+        for suit, count in pairs(suits) do
+            if count >= 5 then
+                flush_suit = suit
+                break
+            end
+        end
+        if flush_suit then
+            local found = 0
+            for j, c in ipairs(hand) do
+                if string.sub(c, 2, 2) == flush_suit and found < 5 then
+                    table.insert(scoring_cards, c)
+                    found = found + 1
+                end
+            end
+        end
+    elseif hand_type == "Straight" or hand_type == "Straight Flush" or hand_type == "Royal Flush" then
+        -- Para escaleras, usar todas las cartas (asumiendo que la función check_straight ya verificó la validez)
+        scoring_cards = hand
+    else
+        -- Para High Card, usar la carta más alta
+        local high_card = nil
+        local high_value = 0
+        for _, card in ipairs(hand) do
+            local rank = string.sub(card, 1, 1)
+            local value = convert_rank_to_num(rank)
+            if value > high_value then
+                high_value = value
+                high_card = card
+            end
+        end
+        if high_card then table.insert(scoring_cards, high_card) end
+    end
+    
+    return scoring_cards
+end
+
+local DS = {
+    SCREEN_WIDTH = 256,
+    SCREEN_HEIGHT = 192,
+    VRAM_OFFSETS = {
+        CARDS = 0,    
+        UI = 64,      
+        SPRITES = 128 
+    },
+    SPRITE_POOL = {},
+    MAX_SPRITES = 32
+}
+
+-- Game state optimized for DS memory
+local GameState = {
+    scene = "menu",
+    round = 0,
+    blind = 1,
+    ante = 1,
+    round_score = 0,
+    minimumscore = 0,
+    hands = 4,
+    discards = 4,
+    cash = 0,
+    gameplay_phase = 0,
+    jokers = {},
+    hand = {},
+    dealt = {},
+    chips = 0,
+    multiplier = 0,
+    reroll_price = 5,
+    hand_size = 8,
+    last_played_hand = "",
+    win = false,
+    sort_mode = 0,
+    can_play_hand = false,
+    can_discard = false
+}
+
+-- Optimized graphics cache with smaller footprint
+local Graphics = {
+    card = Image.load("sprites/cards/card.png", RAM),
+    card_shadow = Image.load("sprites/cards/card_shadow.png", RAM),
+    -- Pre-calculate and cache common transformations
+    scales = {
+        [1.0] = {},    
+        [0.7] = {},    
+        [1.5] = {}     
+    },
+    rotations = {
+        [0] = {},      
+        [90] = {},     
+        [180] = {},    
+        [270] = {}     
+    }
+}
+
+-- Initialize sprite pool
+for i = 1, DS.MAX_SPRITES do
+    DS.SPRITE_POOL[i] = {used = false, sprite = nil}
+end
+
+-- Optimized sprite allocation
+local function get_sprite()
+    for i = 1, DS.MAX_SPRITES do
+        if not DS.SPRITE_POOL[i].used then
+            DS.SPRITE_POOL[i].used = true
+            return i
+        end
+    end
+    return nil
+end
+
+-- Release sprite back to pool
+local function release_sprite(id)
+    if id and DS.SPRITE_POOL[id] then
+        DS.SPRITE_POOL[id].used = false
+        DS.SPRITE_POOL[id].sprite = nil
+    end
+end
+
+-- Optimize tables for DS memory
+local GameConfig = {
+    ante_bases = {300, 800, 2000, 5000, 11000, 20000, 35000, 50000},
+    -- Store small arrays for faster iteration
+    ante_blinds = {[1]={4,5,8,10,11,12,14}, [2]={3,6,9}, [3]={7}, [4]={13}},
+    -- Use shorter strings to save memory
+    debuffed_suits = {[10]="c", [11]="s", [12]="d", [14]="h"},
+    -- Store as integers where possible
+    blind_multis = {10, 15, 40, 20, 20, 10, 20, 20, 20, 20, 20, 20, 20, 20}, -- multiplied by 10
+    blind_payouts = {3, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5}
+}
+
+scene = GameState.scene
 
 -- Run Details
-round = 0
-blind = 1
-ante = 1
-round_score = 0
-minimumscore = 0
-hands = 4
-discards = 4
-cash = 0
-gameplay_phase = 0
-jokers = {}
-hand = {}
-dealt = {}
-chips = 0
-multiplier = 0
-reroll_price = 5
-hand_size = 8
-last_played_hand = ""
-win = false
+round = GameState.round
+blind = GameState.blind
+ante = GameState.ante
+round_score = GameState.round_score
+minimumscore = GameState.minimumscore
+hands = GameState.hands
+discards = GameState.discards
+cash = GameState.cash
+gameplay_phase = GameState.gameplay_phase
+jokers = GameState.jokers
+hand = GameState.hand
+dealt = GameState.dealt
+chips = GameState.chips
+multiplier = GameState.multiplier
+reroll_price = GameState.reroll_price
+hand_size = GameState.hand_size
+last_played_hand = GameState.last_played_hand
+win = GameState.win
 
-sort_mode = 0
+sort_mode = GameState.sort_mode
 
-can_play_hand = false
-can_discard = false
+can_play_hand = GameState.can_play_hand
+can_discard = GameState.can_discard
 
 card_scale_timer = Timer.new(150)
 
@@ -103,25 +334,56 @@ joker_deck = {
 shop_jokers = {}
 
 -- Declaring graphics for card types
-rank_graphics = {["1"] = Image.load("sprites/cards/1.png", VRAM), ["2"] = Image.load("sprites/cards/2.png", VRAM), ["3"] = Image.load("sprites/cards/3.png", VRAM), ["4"] = Image.load("sprites/cards/4.png", VRAM), ["5"] = Image.load("sprites/cards/5.png", VRAM), ["6"] = Image.load("sprites/cards/6.png", VRAM), ["7"] = Image.load("sprites/cards/7.png", VRAM), ["8"] = Image.load("sprites/cards/8.png", VRAM), ["9"] = Image.load("sprites/cards/9.png", VRAM), ["j"] = Image.load("sprites/cards/j.png", VRAM), ["k"] = Image.load("sprites/cards/k.png", VRAM), ["q"] = Image.load("sprites/cards/q.png", VRAM), ["a"] = Image.load("sprites/cards/a.png", VRAM),}
-suit_graphics = {["d"] = Image.load("sprites/cards/d.png", VRAM), ["c"] = Image.load("sprites/cards/c.png", VRAM), ["s"] = Image.load("sprites/cards/s.png", VRAM), ["h"] = Image.load("sprites/cards/h.png", VRAM),}
-joker_graphics = Image.load("sprites/cards/jokers.png", VRAM)
+rank_graphics = {
+    ["1"] = Image.load("sprites/cards/1.png", RAM),
+    ["2"] = Image.load("sprites/cards/2.png", RAM),
+    ["3"] = Image.load("sprites/cards/3.png", RAM),
+    ["4"] = Image.load("sprites/cards/4.png", RAM),
+    ["5"] = Image.load("sprites/cards/5.png", RAM),
+    ["6"] = Image.load("sprites/cards/6.png", RAM),
+    ["7"] = Image.load("sprites/cards/7.png", RAM),
+    ["8"] = Image.load("sprites/cards/8.png", RAM),
+    ["9"] = Image.load("sprites/cards/9.png", RAM),
+    ["j"] = Image.load("sprites/cards/j.png", RAM),
+    ["k"] = Image.load("sprites/cards/k.png", RAM),
+    ["q"] = Image.load("sprites/cards/q.png", RAM),
+    ["a"] = Image.load("sprites/cards/a.png", RAM),
+}
 
-hudbg = Image.load("sprites/ui/hudbackground.png", VRAM)
-hud = Image.load("sprites/ui/hud.png", VRAM)
-blind_ui = Image.load("sprites/ui/blindui.png", VRAM)
-blind_ui_box = Image.load("sprites/ui/blinduibox.png", VRAM)
-tutorial_sheet = Image.load("sprites/ui/ui.png", VRAM)
-shop_sheet = Image.load("sprites/ui/moreui.png", VRAM)
-menubg = Image.load("sprites/ui/mainmenubg.png", VRAM)
-Image.scale(menubg, 256, 194)
-logo = Image.load("sprites/ui/logo.png", VRAM)
+suit_graphics = {
+    ["d"] = Image.load("sprites/cards/d.png", RAM),
+    ["c"] = Image.load("sprites/cards/c.png", RAM),
+    ["s"] = Image.load("sprites/cards/s.png", RAM), 
+    ["h"] = Image.load("sprites/cards/h.png", RAM)
+}
+
+joker_graphics = Image.load("sprites/cards/jokers.png", RAM)
+
+hudbg = Image.load("sprites/ui/hudbackground.png", RAM)
+hud = Image.load("sprites/ui/hud.png", RAM)
+blind_ui = Image.load("sprites/ui/blindui.png", RAM)
+blind_ui_box = Image.load("sprites/ui/blinduibox.png", RAM)
+tutorial_sheet = Image.load("sprites/ui/ui.png", RAM)
+shop_sheet = Image.load("sprites/ui/moreui.png", RAM)
+menubg = Image.load("sprites/ui/mainmenubg.png", RAM)
+logo = Image.load("sprites/ui/logo.png", RAM)
 
 
-Sound.loadBank("soundbanks/soundbank.bin")
-Sound.loadSFX(0)
-Sound.loadSFX(1)
-Sound.setModVolume(600)
+-- Audio system configuration (simplified)
+local Audio = {
+    MUSIC_CHANNEL = 1,
+    SFX_CHANNEL = 0,
+    currentMusic = nil
+}
+
+-- Skip sound initialization since it's not available
+function playMusic(track)
+    -- No-op for now
+end
+
+function stopMusic()
+    -- No-op for now
+end
 
 active_joker_id = -1
 selected_card = 0
@@ -223,95 +485,347 @@ function create_scored(d, s)
     return scored
 end
 
-function get_hand_type(tdeck)
-    local stdeck = sort_deck_rank(tdeck)
+-- Optimizar uso de memoria con tablas pre-asignadas
+local cached_ranks = {}
+local cached_suits = {}
+local current_run = {}
 
-    local card_amounts = get_rank_amount(stdeck)
-    local card_amount_array = {}
-    for i, v in pairs(card_amounts) do
-        table.insert(card_amount_array, v)
-    end
-    table.sort(card_amount_array)
+-- Tabla pre-asignada para valores de cartas
+local card_values = {
+    ["a"] = {1, 14}, -- As puede ser 1 o 14
+    ["2"] = {2},
+    ["3"] = {3},
+    ["4"] = {4},
+    ["5"] = {5},
+    ["6"] = {6},
+    ["7"] = {7},
+    ["8"] = {8},
+    ["9"] = {9},
+    ["1"] = {10},
+    ["j"] = {11},
+    ["q"] = {12},
+    ["k"] = {13}
+}
 
-    if #stdeck == 1 then
-        return "High Card"
+function convert_rank_to_num(rank)
+    if rank == "a" then
+        return 11 -- Para puntaje de chips siempre vale 11
+    elseif rank == "q" or rank == "k" or rank == "j" or rank == "1" then
+        return 10
     else
-        if #stdeck == 2 then
-            if string.sub(stdeck[1], 1, 1) == string.sub(stdeck[2], 1, 1) then
-                return "Pair"
-            else
-                return "High Card"
-            end
-        else
-            if #stdeck == 3 then
-                if string.sub(stdeck[1], 1, 1) == string.sub(stdeck[2], 1, 1) and string.sub(stdeck[2], 1, 1) == string.sub(stdeck[3], 1, 1) then
-                    return "Three of a Kind"
-                else
-                    return "High Card"
-                end
-            else
-                if #stdeck == 4 then
-                    if #card_amount_array == 1 then
-                        return "Four of a Kind"
-                    else
-                        if #card_amount_array == 2 and card_amount_array[1] == 2 and card_amount_array[2] == 2 then
-                            return "Two Pair"
-                        else
-                            return "High Card"
-                        end
-                    end
-                else
-                    if #stdeck == 5 then
-                        flush = false
-                        straight = false
-                        if string.sub(stdeck[1], 2, 2) == string.sub(stdeck[2], 2, 2) and string.sub(stdeck[2], 2, 2) == string.sub(stdeck[3], 2, 2) and string.sub(stdeck[3], 2, 2) == string.sub(stdeck[4], 2, 2) and string.sub(stdeck[4], 2, 2) == string.sub(stdeck[5], 2, 2) then
-                            flush = true
-                        end
-
-                        if convert_rank_to_num(string.sub(stdeck[1], 1, 1)) - 1 == convert_rank_to_num(string.sub(stdeck[2], 1, 1)) and convert_rank_to_num(string.sub(stdeck[1], 1, 1)) - 2 == convert_rank_to_num(string.sub(stdeck[3], 1, 1)) and convert_rank_to_num(string.sub(stdeck[1], 1, 1)) - 3 == convert_rank_to_num(string.sub(stdeck[4], 1, 1)) and convert_rank_to_num(string.sub(stdeck[1], 1, 1)) - 4 == convert_rank_to_num(string.sub(stdeck[5], 1, 1)) then
-                            straight = true
-                        end
-
-                        if flush then
-                            if convert_rank_to_num(string.sub(stdeck[1], 1, 1)) > 9 and convert_rank_to_num(string.sub(stdeck[2], 1, 1)) > 9 and convert_rank_to_num(string.sub(stdeck[3], 1, 1)) > 9 and convert_rank_to_num(string.sub(stdeck[4], 1, 1)) > 9 and convert_rank_to_num(string.sub(stdeck[5], 1, 1)) > 9 then
-                                return "Royal Flush"
-                            else
-                                if straight then
-                                    return "Straight Flush"
-                                else
-                                    return "Flush"
-                                end
-                            end
-                        elseif straight then
-                            return "Straight"
-                        else
-                            local card_amount_array = {}
-
-                            for i, v in pairs(card_amounts) do
-                                table.insert(card_amount_array, v)
-                            end
-
-                            table.sort(card_amount_array)
-                            if card_amount_array[1] == 2 and card_amount_array[2] == 3 then
-                                return "Full House"
-                            else
-                                return "High Card"
-                            end
-                        end
-                    else
-                        return ""
-                    end
-                end
-            end
-        end
+        return tonumber(rank)
     end
 end
 
+function check_straight(cards)
+    if #cards < 5 then return false end
+    
+    -- Crear array de valores incluyendo ambas posibilidades del As
+    local values = {}
+    for _, card in ipairs(cards) do
+        local rank = string.sub(card, 1, 1)
+        for _, val in ipairs(card_values[rank]) do
+            table.insert(values, val)
+        end
+    end
+    table.sort(values)
+    
+    -- Buscar secuencia de 5 cartas
+    local consecutive = 1
+    local prev = values[1]
+    
+    for i = 2, #values do
+        if values[i] == prev + 1 then
+            consecutive = consecutive + 1
+            if consecutive >= 5 then
+                return true
+            end
+        elseif values[i] ~= prev then -- Ignorar duplicados
+            consecutive = 1
+        end
+        prev = values[i]
+    end
+    
+    return false
+end
+
+function get_best_hand_type(tdeck)
+    -- Reutilizar tablas en lugar de crear nuevas
+    for k in pairs(cached_ranks) do cached_ranks[k] = nil end
+    for k in pairs(cached_suits) do cached_suits[k] = nil end
+    
+    local best_hand = "High Card"
+    local pairs = 0
+    local has_three = false
+    
+    -- Contar rangos y palos en una sola pasada
+    for i=1, #tdeck do
+        local card = tdeck[i]
+        local rank = string.sub(card, 1, 1)
+        local suit = string.sub(card, 2, 2)
+        
+        cached_ranks[rank] = (cached_ranks[rank] or 0) + 1
+        cached_suits[suit] = (cached_suits[suit] or 0) + 1
+        
+        -- Detectar combinaciones inmediatamente
+        if cached_ranks[rank] == 4 then
+            return "Four of a Kind"
+        elseif cached_ranks[rank] == 3 then
+            has_three = true
+            best_hand = "Three of a Kind"
+        elseif cached_ranks[rank] == 2 then
+            pairs = pairs + 1
+            if pairs == 2 then
+                best_hand = "Two Pair"
+            elseif best_hand == "High Card" then
+                best_hand = "Pair"
+            end
+        end
+        
+        -- Detectar color inmediatamente
+        if cached_suits[suit] >= 5 then
+            return check_straight_flush(tdeck, suit)
+        end
+    end
+
+    if has_three and pairs > 0 then
+        return "Full House"
+    end
+
+    return best_hand
+end
+
+function check_straight_flush(tdeck, suit)
+    -- Reutilizar tabla para secuencia
+    for i=#current_run, 1, -1 do current_run[i] = nil end
+    
+    -- Obtener solo cartas del mismo palo
+    for i=1, #tdeck do
+        if string.sub(tdeck[i], 2, 2) == suit then
+            table.insert(current_run, tdeck[i])
+        end
+    end
+    
+    -- Verificar escalera real/escalera color
+    if #current_run >= 5 then
+        local is_royal = true
+        local is_straight = true
+        local prev_rank = convert_rank_to_num(string.sub(current_run[1], 1, 1))
+        
+        for i=2, 5 do
+            local rank = convert_rank_to_num(string.sub(current_run[i], 1, 1))
+            if prev_rank - rank ~= 1 then
+                is_straight = false
+                break
+            end
+            if rank < 10 then
+                is_royal = false
+            end
+            prev_rank = rank
+        end
+        
+        if is_royal and is_straight then return "Royal Flush" 
+        elseif is_straight then return "Straight Flush"
+        else return "Flush" end
+    end
+    
+    return "Flush"
+end
+
+function execute_joker(joker, card, hand_type)
+    -- Obtener el mejor tipo de mano posible
+    local best_hand = get_best_hand_type(hand)
+    
+    if joker == "Joker" then
+        multiplier = multiplier + 4
+    elseif joker == "Jolly Joker" then
+        if best_hand == "Pair" then
+            multiplier = multiplier + 8
+        end
+    elseif joker == "Zany Joker" then
+        if hand_type == "Three of a Kind" then
+            multiplier = multiplier + 12
+        end
+    elseif joker == "Mad Joker" then
+        if hand_type == "Two Pair" then
+            multiplier = multiplier + 10
+        end
+    elseif joker == "Crazy Joker" then
+        if hand_type == "Straight" then
+            multiplier = multiplier + 12
+        end
+    elseif joker == "Droll Joker" then
+        if hand_type == "Flush" then
+            multiplier = multiplier + 10
+        end
+    elseif joker == "Sly Joker" then
+        if hand_type == "Pair" then
+            chips = chips + 50
+        end
+    elseif joker == "Clever Joker" then
+        if hand_type == "Two Pair" then
+            chips = chips + 80
+        end
+    elseif joker == "Half Joker" then
+        if #hand < 4 then
+            multiplier = multiplier + 20
+        end
+    elseif joker == "Joker Stencil" then
+        multiplier = multiplier * ((5 - #jokers) + 1)
+    elseif joker == "Banner" then
+        chips = chips + (discards * 30)
+    end
+end
+
+function get_hand_type(tdeck)
+    local stdeck = sort_deck_rank(tdeck)
+	local card_amounts = get_rank_amount(stdeck)
+	local scoring_cards = get_scoring_cards(tdeck, "High Card") -- Inicializar con High Card
+	local best_hand = "High Card"
+
+	-- Pair
+	if #stdeck >= 2 then
+		for i = 1, #stdeck - 1 do
+			if string.sub(stdeck[i], 1, 1) == string.sub(stdeck[i + 1], 1, 1) then
+				best_hand = "Pair"
+				scoring_cards = get_scoring_cards(tdeck, "Pair")
+				break
+			end
+		end
+	end
+
+	-- Two Pair
+	if #stdeck >= 4 and best_hand ~= "Three of a Kind" then
+		local pairs = 0
+		local i = 1
+		while i < #stdeck do
+			if string.sub(stdeck[i], 1, 1) == string.sub(stdeck[i + 1], 1, 1) then
+				pairs = pairs + 1
+				i = i + 2
+			else
+				i = i + 1
+			end
+		end
+		if pairs >= 2 then
+			best_hand = "Two Pair"
+			scoring_cards = get_scoring_cards(tdeck, "Two Pair")
+		end
+	end
+
+	-- Three of a Kind
+	if #stdeck >= 3 then
+		for i = 1, #stdeck - 2 do
+			if string.sub(stdeck[i], 1, 1) == string.sub(stdeck[i + 1], 1, 1) and string.sub(stdeck[i], 1, 1) == string.sub(stdeck[i + 2], 1, 1) then
+				best_hand = "Three of a Kind"
+				scoring_cards = get_scoring_cards(tdeck, "Three of a Kind")
+				break
+			end
+		end
+	end
+
+	-- Straight
+    if check_straight(stdeck) then
+		best_hand = "Straight"
+		scoring_cards = get_scoring_cards(tdeck, "Straight")
+	end
+
+	-- Flush
+	if #stdeck >= 5 then
+		local is_flush = true
+		local first_suit = string.sub(stdeck[1], 2, 2)
+		for i = 2, #stdeck do
+			if string.sub(stdeck[i], 2, 2) ~= first_suit then
+				is_flush = false
+				break
+			end
+		end
+		if is_flush then
+			best_hand = "Flush"
+			scoring_cards = get_scoring_cards(tdeck, "Flush")
+		end
+	end
+
+	-- Full House
+	if #stdeck == 5 and best_hand ~= "Four of a Kind" then
+		local has_three = false
+		local has_pair = false
+		local three_rank = nil
+		local pair_rank = nil
+
+		for rank, count in pairs(card_amounts) do
+			if count == 3 then
+				has_three = true
+				three_rank = rank
+			elseif count == 2 then
+				has_pair = true
+				pair_rank = rank
+			end
+		end
+
+		if has_three and has_pair then
+			best_hand = "Full House"
+			scoring_cards = get_scoring_cards(tdeck, "Full House")
+		end
+	end
+
+	-- Four of a Kind
+	if #stdeck >= 4 then
+		for rank, count in pairs(card_amounts) do
+			if count == 4 then
+				best_hand = "Four of a Kind"
+				scoring_cards = get_scoring_cards(tdeck, "Four of a Kind")
+				break
+			end
+		end
+	end
+
+	-- Straight Flush
+	if best_hand == "Straight" and #stdeck >= 5 then
+		local is_straight_flush = true
+		local first_suit = string.sub(stdeck[1], 2, 2)
+		for i = 2, #stdeck do
+			if string.sub(stdeck[i], 2, 2) ~= first_suit then
+				is_straight_flush = false
+				break
+			end
+		end
+		if is_straight_flush then
+			best_hand = "Straight Flush"
+			scoring_cards = get_scoring_cards(tdeck, "Straight Flush")
+		end
+	end
+
+	-- Royal Flush
+	if best_hand == "Straight Flush" and #stdeck >= 5 then
+		local is_royal = true
+		local royal_ranks = {"1", "j", "q", "k", "a"}
+		for i = 1, #royal_ranks do
+			local found = false
+			for j = 1, #stdeck do
+				if string.sub(stdeck[j], 1, 1) == royal_ranks[i] then
+					found = true
+					break
+				end
+			end
+			if not found then
+				is_royal = false
+				break
+			end
+		end
+		if is_royal then
+			best_hand = "Royal Flush"
+			scoring_cards = get_scoring_cards(tdeck, "Royal Flush")
+		end
+	end
+
+	return best_hand
+end
+
 function convert_rank_to_num(rank)
-    if rank == "q" or rank == "k" or rank == "j" or rank == "1" then
+    if rank == "a" then
+        return 11 -- Para puntaje de chips siempre vale 11
+    elseif rank == "q" or rank == "k" or rank == "j" or rank == "1" then
         return 10
-    elseif rank == "a" then
-        return 11
     else
         return tonumber(rank)
     end
@@ -354,64 +868,6 @@ function table_to_string(tbl)
         result = result:sub(1, result:len()-1)
     end
     return result.."}"
-end
-
-function execute_joker(joker, card, hand_type)
-    if joker == "Joker" then
-        multiplier = multiplier + 4
-    elseif joker == "Wrathful Joker" then
-        if string.sub(card, 2, 2) == "s" then
-            multiplier = multiplier + 3
-        end
-    elseif joker == "Greedy Joker" then
-        if string.sub(card, 2, 2) == "d" then
-            multiplier = multiplier + 3
-        end
-    elseif joker == "Lusty Joker" then
-        if string.sub(card, 2, 2) == "h" then
-            multiplier = multiplier + 3
-        end
-    elseif joker == "Gluttonous Joker" then
-        if string.sub(card, 2, 2) == "c" then
-            multiplier = multiplier + 3
-        end
-    elseif joker == "Jolly Joker" then
-        if hand_type == "Pair" or hand_type == "Two Pair" then
-            multiplier = multiplier + 8
-        end
-    elseif joker == "Zany Joker" then
-        if hand_type == "Three of a Kind" then
-            multiplier = multiplier + 12
-        end
-    elseif joker == "Mad Joker" then
-        if hand_type == "Two Pair" then
-            multiplier = multiplier + 10
-        end
-    elseif joker == "Crazy Joker" then
-        if hand_type == "Straight" then
-            multiplier = multiplier + 12
-        end
-    elseif joker == "Droll Joker" then
-        if hand_type == "Flush" then
-            multiplier = multiplier + 10
-        end
-    elseif joker == "Sly Joker" then
-        if hand_type == "Pair" then
-            chips = chips + 50
-        end
-    elseif joker == "Clever Joker" then
-        if hand_type == "Two Pair" then
-            chips = chips + 80
-        end
-    elseif joker == "Half Joker" then
-        if #hand < 4 then
-            multiplier = multiplier + 20
-        end
-    elseif joker == "Joker Stencil" then
-        multiplier = multiplier * ((5 - #jokers) + 1)
-    elseif joker == "Banner" then
-        chips = chips + (discards * 30)
-    end
 end
 
 function add_to_dealt()
@@ -622,14 +1078,14 @@ while not Keys.newPress.Start do
 
     if scene == "menu" then
         Image.mirrorV(menubg, true)
-        screen.blit(SCREEN_DOWN, 0, -1, menubg)
+        screen.blit(SCREEN_DOWN, 0, 0, menubg)
         Image.mirrorV(menubg, false)
         screen.blit(SCREEN_UP, 0, 0, menubg)
         screen.blit(SCREEN_UP, 39, 44 - (logo_bop / 30), logo)
 
         screen.setAlpha(50)
         screen.drawFillRect(SCREEN_DOWN, 0, 78, 256, 113, Color.new256(0, 0, 0))
-        screen.drawFillRect(SCREEN_UP, 0, 192, 256, 178, Color.new256(0, 0, 0))
+        screen.drawFillRect(SCREEN_UP, 0, 78, 256, 113, Color.new256(0, 0, 0)) -- Ajuste aquí
         screen.setAlpha(100)
         screen.drawFillRect(SCREEN_DOWN, 0, 80, 256, 111, Color.new256(111, 111, 111))
         screen.print(SCREEN_DOWN, 84, 92, "PRESS A TO PLAY")
