@@ -1258,12 +1258,21 @@ while not Keys.newPress.Start do
                         selected_card = 6
                         card_count = 1
                     else
-                        if blind == 9 and last_played_hand == hand_type or blind == 9 and last_played_hand == "" or blind == 4 and #hand == 5 or blind ~= 10 and blind ~= 11 and blind ~= 12 and blind ~= 13 and blind ~= 14 and blind ~= 9 and blind ~= 4 or string.sub(hand[card_count], 2, 2) ~= debuffed_suits[blind] or blind == 13 and string.sub(hand[card_count], 1, 1) ~= "j" and string.sub(hand[card_count], 1, 1) ~= "k" and string.sub(hand[card_count], 1, 1) ~= "q" then
-                            chips = chips + convert_rank_to_num(string.sub(hand[card_count], 1, 1))
-                            
-                            for i,v in ipairs(jokers) do
-                                if not indep_jokers[v] then
-                                    execute_joker(v, hand[card_count], hand_type)
+                        local scoring_cards = get_scoring_cards(hand, hand_type)
+                        local card_counted = {}
+                        for _, card in ipairs(scoring_cards) do
+                            card_counted[card] = true
+                        end
+                        
+                        -- Solo procesar la carta si está en scoring_cards
+                        if card_counted[hand[card_count]] then
+                            if blind == 9 and last_played_hand == hand_type or blind == 9 and last_played_hand == "" or blind == 4 and #hand == 5 or blind ~= 10 and blind ~= 11 and blind ~= 12 and blind ~= 13 and blind ~= 14 and blind ~= 9 and blind ~= 4 or string.sub(hand[card_count], 2, 2) ~= debuffed_suits[blind] or blind == 13 and string.sub(hand[card_count], 1, 1) ~= "j" and string.sub(hand[card_count], 1, 1) ~= "k" and string.sub(hand[card_count], 1, 1) ~= "q" then
+                                chips = chips + convert_rank_to_num(string.sub(hand[card_count], 1, 1))
+                                
+                                for i,v in ipairs(jokers) do
+                                    if not indep_jokers[v] then
+                                        execute_joker(v, hand[card_count], hand_type)
+                                    end
                                 end
                             end
                         end
@@ -1297,6 +1306,19 @@ while not Keys.newPress.Start do
                 sleep(700)
             elseif card_count_phase == 3 then
                 card_count_phase = 4
+				local scoring_cards = get_scoring_cards(hand, hand_type)
+				local card_counted = {}
+				local total_chips = 0
+				for i, card in ipairs(scoring_cards) do
+					total_chips = total_chips + convert_rank_to_num(string.sub(card, 1, 1))
+					card_counted[card] = true  -- Marcar la carta como contada
+					for i,v in ipairs(jokers) do
+						if not indep_jokers[v] then
+							execute_joker(v, card, hand_type)
+						end
+					end
+				end
+				chips = total_chips
                 round_score = round_score + (chips * multiplier)
                 chips = 0
                 multiplier = 0
@@ -1588,7 +1610,27 @@ while not Keys.newPress.Start do
             draw_card_deck_graphic(32 + ((8 - #hand) * 12) , 58, hand, false)
         elseif gameplay_phase == 3 then
             draw_card_deck_graphic(32 + ((8 - #dealt) * 12) , 158, dealt, false)
-            draw_card_deck_graphic(32 + ((8 - #hand) * 12) , 58, hand, true)
+            local scoring_cards = get_scoring_cards(hand, hand_type)
+            local card_counted = {}
+            for i, card in ipairs(scoring_cards) do
+                card_counted[card] = true
+            end
+            
+            local x = 0
+            local card_id = 0
+            for i,v in ipairs(hand) do
+                if card_counted[v] and card_id == selected_card then 
+                    -- Solo animar si es una carta que puntúa y es la seleccionada
+                    draw_card_shadow_graphic(32 + ((8 - #hand) * 12) + x, 58 + 2, 1, 0, 0)
+                    draw_card_graphic(32 + ((8 - #hand) * 12) + x - 3, 58 - 16, 1 + (card_scale_timer:getTime() / 500), 505 + (card_scale_timer:getTime() / 500) * 10, string.sub(v, 1, 1), string.sub(v, 2, 2))
+                else
+                    -- El resto de cartas se dibujan normal
+                    draw_card_shadow_graphic(32 + ((8 - #hand) * 12) + x, 58 + 2, 1, 0, 0)
+                    draw_card_graphic(32 + ((8 - #hand) * 12) + x, 58, 1, 0, string.sub(v, 1, 1), string.sub(v, 2, 2))
+                end
+                x = x + 24
+                card_id = card_id + 1
+            end
         end
     end
 
@@ -1607,4 +1649,5 @@ end
 
 for i,v in ipairs(suit_graphics) do
     Image.destroy(v)
+
 end
